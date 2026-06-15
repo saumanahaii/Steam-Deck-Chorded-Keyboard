@@ -19,6 +19,7 @@ touch the gamepad device at all.
 """
 
 import threading
+import os
 import sys
 import signal
 import logging
@@ -55,7 +56,8 @@ log = logging.getLogger(__name__)
 
 # ─── Input key groups ────────────────────────────────────────────────────────
 GRIP_KEYS = {KEY_KP1: "L4", KEY_KP2: "L5", KEY_KP3: "R4", KEY_KP4: "R5"}
-LAYER_KEYS = {KEY_KP5: "up", KEY_KP6: "shift", KEY_KP7: "numbers", KEY_KP8: "symbols"}
+# KEY_KP5 (Dpad Up) is intentionally left unmapped — free for future use.
+LAYER_KEYS = {KEY_KP6: "shift", KEY_KP7: "numbers", KEY_KP8: "symbols"}
 FACE_KEYS = {KEY_KP9: "A", KEY_KP0: "B", KEY_KPDOT: "X", KEY_KPPLUS: "Y"}
 ALL_KEYS = set(GRIP_KEYS) | set(LAYER_KEYS) | set(FACE_KEYS)
 
@@ -80,20 +82,20 @@ FACE_STATES = {
 # ─── Chord map (unchanged layout) ────────────────────────────────────────────
 CHORD_MAP = {
     "base": {
-        "L1":    {"A": "e",  "B": "t",  "Y": "r",  "X": "h",  "A+B": "er", "X+Y": None},
+        "L1":    {"A": "e",  "B": "t",  "Y": "r",  "X": "h",  "A+B": "er", "X+Y": "q"},
         "L2":    {"A": "a",  "B": "n",  "Y": "d",  "X": " ",  "A+B": "BKSP", "X+Y": "ENT"},
-        "L1+L2": {"A": "i",  "B": "n",  "Y": "o",  "X": "g",  "A+B": ",",  "X+Y": "."},
+        "L1+L2": {"A": "i",  "B": "x",  "Y": "o",  "X": "g",  "A+B": ",",  "X+Y": "."},
         "R1":    {"A": "s",  "B": "c",  "Y": "f",  "X": "w",  "A+B": "'",  "X+Y": "-"},
         "R2":    {"A": "l",  "B": "u",  "Y": "p",  "X": "b",  "A+B": "!",  "X+Y": "?"},
         "R1+R2": {"A": "m",  "B": "y",  "Y": "k",  "X": "v",  "A+B": "j",  "X+Y": "z"},
     },
     "shift": {
-        "L1":    {"A": "E",  "B": "T",  "Y": "R",  "X": "H",  "A+B": None, "X+Y": None},
+        "L1":    {"A": "E",  "B": "T",  "Y": "R",  "X": "H",  "A+B": None, "X+Y": "Q"},
         "L2":    {"A": "A",  "B": "N",  "Y": "D",  "X": " ",  "A+B": "BKSP", "X+Y": "ENT"},
-        "L1+L2": {"A": "I",  "B": "N",  "Y": "O",  "X": "G",  "A+B": ";",  "X+Y": ":"},
+        "L1+L2": {"A": "I",  "B": "X",  "Y": "O",  "X": "G",  "A+B": ";",  "X+Y": ":"},
         "R1":    {"A": "S",  "B": "C",  "Y": "F",  "X": "W",  "A+B": '"',  "X+Y": None},
         "R2":    {"A": "L",  "B": "U",  "Y": "P",  "X": "B",  "A+B": "(",  "X+Y": ")"},
-        "R1+R2": {"A": "M",  "B": "Y",  "Y": "K",  "X": "V",  "A+B": "Q",  "X+Y": "X"},
+        "R1+R2": {"A": "M",  "B": "Y",  "Y": "K",  "X": "V",  "A+B": "J",  "X+Y": "Z"},
     },
     "numbers": {
         "L1":    {"A": "1",  "B": "2",  "Y": "3",  "X": "4",  "A+B": None, "X+Y": None},
@@ -373,10 +375,19 @@ def main():
     signal.signal(signal.SIGTERM, on_signal)
     signal.signal(signal.SIGINT, on_signal)
 
+    # The tray only works in Desktop Mode (it needs an X11/AppIndicator tray).
+    # In Gaming Mode there's no tray, so fall back to a headless loop that keeps
+    # the reader thread alive and typing. CHORDED_NO_TRAY=1 forces headless.
+    no_tray = os.environ.get("CHORDED_NO_TRAY") == "1"
     try:
-        run_tray(enabled_flag, stop_event)
+        if no_tray:
+            log.info("CHORDED_NO_TRAY set; running headless (no tray icon)")
+            stop_event.wait()
+        else:
+            run_tray(enabled_flag, stop_event)
     except Exception as ex:
-        log.error(f"Tray error: {ex}")
+        log.warning(f"Tray unavailable ({ex}); running headless. Typing stays active.")
+        stop_event.wait()
     finally:
         reader.stop()
         emitter.close()
