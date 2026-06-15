@@ -54,6 +54,21 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
+# Set CHORDED_DEBUG=1 to log every raw key event from the grabbed devices
+# (device + keycode name + press/release). Use this to discover which device and
+# which keycodes your mapped buttons actually emit.
+DEBUG = os.environ.get("CHORDED_DEBUG") == "1"
+if DEBUG:
+    log.setLevel(logging.DEBUG)
+
+
+def _key_name(code):
+    name = e.KEY.get(code, code)
+    if isinstance(name, (list, tuple)):
+        name = name[0]
+    return name
+
+
 # ─── Input key groups ────────────────────────────────────────────────────────
 GRIP_KEYS = {KEY_KP1: "L4", KEY_KP2: "L5", KEY_KP3: "R4", KEY_KP4: "R5"}
 # KEY_KP5 (Dpad Up) is intentionally left unmapped — free for future use.
@@ -338,7 +353,16 @@ class Reader:
                     for key, _ in sel.select(timeout=1.0):
                         dev = key.fileobj
                         for event in dev.read():
-                            if event.type == EV_KEY and event.code in ALL_KEYS:
+                            if event.type != EV_KEY:
+                                continue
+                            if DEBUG:
+                                mapped = event.code in ALL_KEYS
+                                log.debug(
+                                    f"raw {dev.name!r} "
+                                    f"{_key_name(event.code)}({event.code}) "
+                                    f"val={event.value} mapped={mapped}"
+                                )
+                            if event.code in ALL_KEYS:
                                 self.engine.handle(event.code, event.value)
             except OSError as ex:
                 log.warning(f"Device went away ({ex}); rescanning...")
