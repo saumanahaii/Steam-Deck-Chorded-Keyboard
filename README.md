@@ -124,6 +124,10 @@ The toggle **tray icon only appears in Desktop Mode** (it needs an X11/
 AppIndicator tray). The daemon still types in **Gaming Mode** — it runs
 headless there. You can force headless mode with `CHORDED_NO_TRAY=1`.
 
+**Right-click** the tray icon to toggle — the "Enabled" menu item shows a
+checkmark when active. The KDE/AppIndicator tray doesn't react to left-clicks,
+so use the menu.
+
 ## Troubleshooting
 
 ```bash
@@ -134,6 +138,9 @@ journalctl --user -u chorded-keyboard -f       # live logs
 The daemon also writes to `~/.local/share/chorded-keyboard/chorded.log`.
 
 - **Nothing types:** confirm the Steam Input numpad mapping is active, and that
-  you logged out/in after install (for `input` group membership).
+  you logged out/in after install (for `input` group membership). Check the log
+  for the **device inventory** dump and a `Grabbed kbd device ...` line — if no
+  device shows `numpad_sig=True`, Steam isn't exposing a grabbable keyboard
+  device (it may be injecting via XTEST); try Gaming Mode.
 - **Wrong symbols:** the character map assumes a **US-QWERTY** layout. Non-US
   layouts will produce different shifted symbols.
