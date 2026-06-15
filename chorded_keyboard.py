@@ -251,21 +251,61 @@ class ChordEngine:
             self.emitter.emit(token)
 
 # ─── Device discovery ────────────────────────────────────────────────────────
+# The numpad keys our mapped buttons should produce. A device that advertises
+# all of these is almost certainly Steam's virtual keyboard, regardless of how
+# it's named.
+NUMPAD_SIGNATURE = {
+    KEY_KP1, KEY_KP2, KEY_KP3, KEY_KP4,
+    KEY_KP9, KEY_KP0, KEY_KPDOT, KEY_KPPLUS,
+}
+
+_inventory_logged = False
+
+def _log_device_inventory():
+    """One-time dump of every /dev/input device so the log tells us exactly what
+    Steam exposes. Helps distinguish 'matcher too strict' from 'no grabbable
+    device exists at all' (e.g. Steam injecting via XTEST)."""
+    global _inventory_logged
+    if _inventory_logged:
+        return
+    _inventory_logged = True
+    log.info("─── Input device inventory ───")
+    for path in list_devices():
+        try:
+            dev = InputDevice(path)
+            keys = set(dev.capabilities().get(EV_KEY, []))
+            has_kp1 = KEY_KP1 in keys
+            has_sig = NUMPAD_SIGNATURE <= keys
+            log.info(f"  {path}: {dev.name!r} KP1={has_kp1} numpad_sig={has_sig}")
+            dev.close()
+        except Exception as ex:
+            log.info(f"  {path}: <unreadable: {ex}>")
+    log.info("──────────────────────────────")
+
 def find_steam_kbd_devices():
-    """Valve/Steam-named devices with keyboard capability. These carry the
-    numpad keys Steam Input emits for our mapped buttons. We grab them
-    EXCLUSIVELY so the raw numpad presses never reach other apps. Real
-    (non-Valve) keyboards are never touched."""
+    """Find and exclusively grab the device(s) carrying the numpad keys Steam
+    Input emits for our mapped buttons, so the raw numpad presses never reach
+    other apps. We match by Valve/Steam name OR by the numpad-key signature
+    (covers virtual keyboards that aren't named 'steam'). Our own emitter and
+    real full keyboards without the signature are never touched."""
+    _log_device_inventory()
     found = []
     for path in list_devices():
         try:
             dev = InputDevice(path)
             name = dev.name.lower()
-            keys = dev.capabilities().get(EV_KEY, [])
-            if ("valve" in name or "steam" in name) and KEY_KP1 in keys:
+            keys = set(dev.capabilities().get(EV_KEY, []))
+            # Never grab the device we created ourselves.
+            if "chorded-keyboard" in name:
+                dev.close()
+                continue
+            named = ("valve" in name or "steam" in name) and KEY_KP1 in keys
+            signature = NUMPAD_SIGNATURE <= keys
+            if named or signature:
                 try:
                     dev.grab()
-                    log.info(f"Grabbed Steam kbd device: {dev.name!r} at {path}")
+                    why = "name" if named else "numpad-signature"
+                    log.info(f"Grabbed kbd device ({why}): {dev.name!r} at {path}")
                     found.append(dev)
                 except OSError as ex:
                     log.warning(f"Could not grab {path}: {ex}")
@@ -336,6 +376,10 @@ def run_tray(enabled_flag, stop_event):
         enabled_flag[0] = not enabled_flag[0]
         icon.icon = make_icon(enabled_flag[0])
         icon.title = f"Chorded Keyboard - {'ON' if enabled_flag[0] else 'OFF'}"
+        # Refresh the menu so the checkmark reflects the new state. The KDE/
+        # AppIndicator tray doesn't fire left-click "default" actions, so the
+        # state must be visible and toggled from the (right-click) menu.
+        icon.update_menu()
         log.info(f"Chorded keyboard {'enabled' if enabled_flag[0] else 'disabled'}")
 
     def quit_app(icon, item):
@@ -347,7 +391,12 @@ def run_tray(enabled_flag, stop_event):
         make_icon(enabled_flag[0]),
         f"Chorded Keyboard - {'ON' if enabled_flag[0] else 'OFF'}",
         menu=Menu(
-            MenuItem("Toggle On/Off", toggle, default=True),
+            MenuItem(
+                "Enabled",
+                toggle,
+                checked=lambda item: enabled_flag[0],
+                default=True,
+            ),
             MenuItem("Quit", quit_app),
         ),
     )
